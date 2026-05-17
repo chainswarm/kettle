@@ -1,0 +1,23 @@
+{
+  "agentName": "Kettle Local Agent",
+  "webhookPath": "/webhooks/linear",
+  "defaultRepository": {
+    "hostname": "github.com",
+    "repositoryFullName": "chainswarm/kettle",
+    "localPath": "/home/aphex5/work/kettle",
+    "baseBranch": "main"
+  },
+  "execution": {
+    "maxConcurrentJobsPerRepository": 1,
+    "defaultGsdMode": "quick",
+    "codexSandbox": "workspace-write",
+    "codexApprovalPolicy": "never"
+  },
+  "routing": {
+    "codex:fast": "fast",
+    "codex:quick": "quick",
+    "codex:phase": "phase",
+    "codex:review": "review",
+    "codex:ship": "ship"
+  }
+}
