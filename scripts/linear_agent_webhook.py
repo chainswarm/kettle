@@ -42,6 +42,7 @@ LINEAR_ACCESS_TOKEN = os.getenv("LINEAR_ACCESS_TOKEN", "")
 JOBS_DIR = REPO_DIR / ".linear-agent" / "jobs"
 RUNNER = REPO_DIR / "scripts" / "run_linear_gsd_task.sh"
 MAX_SKEW_MS = 60_000
+TRIGGER_PHRASE = os.getenv("LINEAR_TRIGGER_PHRASE", "@kettle")
 
 
 def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -113,11 +114,38 @@ def _emit_activity(agent_session_id: str | None, content: dict[str, Any]) -> Non
 
 
 def _agent_session(payload: dict[str, Any]) -> dict[str, Any]:
-    return payload.get("agentSession") or payload.get("data", {}).get("agentSession") or {}
+    session = payload.get("agentSession") or payload.get("data", {}).get("agentSession")
+    if isinstance(session, dict):
+        return session
+
+    if payload.get("type") == "Comment":
+        data = payload.get("data") or {}
+        issue = data.get("issue") or {}
+        return {
+            "id": None,
+            "promptContext": data.get("body") or data.get("bodyData") or "",
+            "issue": issue,
+        }
+
+    return {}
 
 
 def _issue_from_session(session: dict[str, Any]) -> dict[str, Any]:
     return session.get("issue") or {}
+
+
+def _should_process(payload: dict[str, Any]) -> tuple[bool, str]:
+    if payload.get("agentSession") or payload.get("data", {}).get("agentSession"):
+        return True, "agent session event"
+
+    if payload.get("type") == "Comment":
+        data = payload.get("data") or {}
+        body = str(data.get("body") or data.get("bodyData") or "")
+        if TRIGGER_PHRASE and TRIGGER_PHRASE.lower() not in body.lower():
+            return False, f"comment missing trigger phrase {TRIGGER_PHRASE!r}"
+        return True, "triggered comment"
+
+    return False, f"ignored event type {payload.get('type')!r}"
 
 
 def _job_paths(delivery_id: str) -> tuple[Path, Path]:
@@ -238,6 +266,12 @@ class LinearAgentHandler(BaseHTTPRequestHandler):
         payload_path, prompt_path = _job_paths(delivery_id)
         if payload_path.exists():
             _json_response(self, 200, {"status": "duplicate", "deliveryId": delivery_id})
+            return
+
+        should_process, reason = _should_process(payload)
+        if not should_process:
+            _write_status(delivery_id, "ignored", reason=reason)
+            _json_response(self, 200, {"status": "ignored", "reason": reason, "deliveryId": delivery_id})
             return
 
         payload_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

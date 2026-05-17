@@ -88,23 +88,16 @@ Copy `.env.example` to `.env` and fill:
 Expose the future webhook worker through Cloudflare Tunnel or an equivalent
 public HTTPS endpoint.
 
-Run the local webhook worker:
+Automated start:
 
 ```bash
-python3 scripts/linear_agent_webhook.py
+python3 scripts/start_linear_agent_stack.py
 ```
 
-In another terminal, expose it with Cloudflare Tunnel:
-
-```bash
-cloudflared tunnel --url http://127.0.0.1:8787
-```
-
-Use the resulting HTTPS URL as:
-
-```text
-https://<tunnel-host>/webhooks/linear
-```
+This starts the worker, starts a Cloudflare quick tunnel, and updates the Linear
+webhook named by `LINEAR_WEBHOOK_LABEL` to the current tunnel URL. The default
+generic fallback listens to **Comment** events and only starts Codex when the
+comment contains `LINEAR_TRIGGER_PHRASE`, default `@kettle`.
 
 Manual smoke test for the local executor:
 

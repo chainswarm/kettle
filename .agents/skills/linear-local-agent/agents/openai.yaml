@@ -1,0 +1,3 @@
+display_name: "Linear Local Agent"
+short_description: "Start, update, and troubleshoot Kettle's Linear to local Codex worker."
+default_prompt: "Operate the Linear local agent stack and verify Linear webhook delivery to local Codex/GSD."
