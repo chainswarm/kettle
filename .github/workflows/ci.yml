@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Layer 1 — pytest
+        run: pytest tests/ -x -q
+
+      - name: Layer 2 — Docker Compose config validation
+        run: |
+          docker compose -f docker-compose.tee-dev.yml config > /dev/null
+          echo "Layer 2 compose config valid"
+
+      - name: Layer 3 — Chain smoke test (informational, no testnet in CI)
+        # Expects exit 1 (no testnet node available in CI). Step is
+        # informational only — failure here does not block the PR.
+        # Run against a real testnet manually before merging chain changes.
+        continue-on-error: true
+        run: |
+          python scripts/smoke_test_chain.py \
+            --local_rpc \
+            --subnet_id 1 \
+            --epoch 0 \
+            --overwatch_node_id 1 \
+            || echo "Chain smoke test: no testnet in CI (expected)"

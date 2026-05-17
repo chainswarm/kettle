@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-white text-gray-800 antialiased;
+}
+
+/* Thin scrollbar with green track */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-green-50;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-green-200 rounded;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-green-300;
+}
+
+/* Flash animation for new events */
+@keyframes flash-green {
+  0% { background-color: rgb(220 252 231); }
+  100% { background-color: transparent; }
+}
+
+.event-flash {
+  animation: flash-green 1s ease-out;
+}

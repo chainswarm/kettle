@@ -1,0 +1,112 @@
+version: '3.8'
+
+# Remote node — joins an existing subnet via a well-known bootnode.
+#
+# Run on any CVM to join the network. Only requires:
+#   - ANNOUNCE_IP: this machine's public IP
+#   - BOOTNODE_ADDR: full multiaddr of the bootnode (ip4+tcp+p2p)
+#
+# Usage:
+#   ANNOUNCE_IP=40.112.65.210 \
+#   BOOTNODE_ADDR=/ip4/48.209.8.60/tcp/38960/p2p/12D3KooWLGmub3LXuKQixBD5XwNW4PtSfnrysYzqs1oj19HxMUCF \
+#     docker compose -f docker-compose.tee-remote.yml up --build
+
+x-tee-env: &tee-env
+  TEE_BACKEND: "sev-snp"
+  MOCK_TEE: "false"
+  EXPECTED_MEASUREMENT: ""
+  MIN_TEE_SCORE: "0.0"
+  TCB_POLICY: "strict"
+  ALLOW_SHARED_HARDWARE: "false"
+  LOG_JSON: "true"
+  ANNOUNCE_IP: "${ANNOUNCE_IP}"
+
+x-tpm-device: &tpm-device
+  devices:
+    - /dev/tpmrm0:/dev/tpmrm0
+
+services:
+  miner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tee-remote-miner
+    ports:
+      - "38963:38963"
+    volumes:
+      - ./charleth.key:/app/charleth.key:ro
+      - tee-miner-db:/app/db
+      - mock-chain:/app/mock_chain
+    environment:
+      <<: *tee-env
+      MOCK_CHAIN_DB_PATH: "/app/mock_chain/mock_hypertensor.db"
+      TAMPER_RATE: "0.001"
+    <<: *tpm-device
+    command: >
+      subnet.cli.run_node
+      --private_key_path /app/charleth.key
+      --port 38963
+      --base_path /app/db/data
+      --bootstrap ${BOOTNODE_ADDR}
+      --subnet_id 1
+      --subnet_node_id 3
+      --no_blockchain_rpc
+    restart: unless-stopped
+
+  dashboard-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tee-remote-dashboard-api
+    ports:
+      - "8100:8100"
+    volumes:
+      - tee-miner-db:/app/db
+      - mock-chain:/app/mock_chain:ro
+    environment:
+      PYTHONUNBUFFERED: "1"
+      DASHBOARD_DB_PATH: "/app/db/data"
+      DASHBOARD_PORT: "8100"
+      DASHBOARD_AUTH_TOKEN: "${DASHBOARD_AUTH_TOKEN:-dev-admin-token}"
+      MOCK_CHAIN_DB_PATH: "/app/mock_chain/mock_hypertensor.db"
+    command: >
+      subnet.dashboard.cli
+    depends_on:
+      - miner
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: tee-remote-dashboard
+    ports:
+      - "3080:80"
+    depends_on:
+      - dashboard-api
+    restart: unless-stopped
+
+  x402-frontier:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tee-remote-x402
+    ports:
+      - "8402:8402"
+    environment:
+      PYTHONUNBUFFERED: "1"
+      X402_PAYMENT_ADDRESS: "0x0000000000000000000000000000000000000000"
+      X402_REQUIRE_PAYMENT: "false"
+      X402_ACCEPTED_NETWORKS: "base-sepolia"
+      X402_ACCEPTED_TOKENS: "USDC"
+      FRONTIER_STALENESS_S: "6.0"
+    <<: *tpm-device
+    command: >
+      subnet.x402.cli
+    depends_on:
+      - miner
+    restart: unless-stopped
+
+volumes:
+  tee-miner-db:
+  mock-chain:

@@ -1,0 +1,3 @@
+display_name: "Hypertensor Subnet"
+short_description: "Hypertensor-native terminology and architecture guidance for subnet work."
+default_prompt: "Use Hypertensor-native node terminology and preserve deterministic subnet behavior."

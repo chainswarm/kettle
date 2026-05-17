@@ -1,0 +1,178 @@
+# Gramine manifest template for Hypertensor TEE subnet miner
+#
+# Usage:
+#   gramine-manifest -Dlog_level=warning -Darch_libdir=/lib/x86_64-linux-gnu \
+#       gramine.manifest.template > gramine.manifest
+#   gramine-sgx-sign --manifest gramine.manifest --output gramine.manifest.sgx
+#   gramine-sgx python3 -m subnet.cli.run_node [args]
+#
+# Or for development (no hardware SGX):
+#   gramine-direct python3 -m subnet.cli.run_node [args]
+#
+# Environment variables consumed:
+#   MOCK_TEE=true         — use mock backend (default for dev)
+#   TEE_BACKEND=tdx|sev-snp — real hardware backend
+#   EXPECTED_MEASUREMENT  — hex SHA-384 of the enclave binary (validated at startup)
+#   MIN_TEE_SCORE=1.0     — require real hardware in production
+#   TCB_POLICY=strict     — reject any non-UpToDate TCB status
+#   PCCS_URL              — PCCS server for DCAP collateral (empty = Intel PCS)
+#   SEALED_STORAGE_PATH   — path inside enclave for sealed state (default: /sealed)
+#
+# Security notes:
+# - The manifest is signed; its measurement (MRENCLAVE) covers Gramine + Python + subnet code
+# - Sealed storage is at SEALED_STORAGE_PATH; only this measurement can decrypt it
+# - RA-TLS cert is generated inside the enclave from the measurement
+# - Debug mode is disabled in production; enable only for development (score=0.5 → 0.0)
+
+libos.entrypoint = "{{ gramine.libos }}"
+
+loader.entrypoint = "file:{{ gramine.libos }}"
+loader.log_level = "{{ log_level }}"
+
+# Python interpreter
+loader.argv = [
+    "python3", "-m", "subnet.cli.run_node",
+    # Arguments are passed via environment or command line — not hardcoded here
+]
+
+loader.env.LD_LIBRARY_PATH = "/usr/lib:{{ arch_libdir }}:/usr{{ arch_libdir }}"
+loader.env.PATH = "/usr/local/bin:/usr/bin:/bin"
+loader.env.PYTHONPATH = "/app"
+
+# TEE environment variables (passed from host — visible inside enclave)
+loader.env.MOCK_TEE = { passthrough = true }
+loader.env.TEE_BACKEND = { passthrough = true }
+loader.env.EXPECTED_MEASUREMENT = { passthrough = true }
+loader.env.MIN_TEE_SCORE = { passthrough = true }
+loader.env.TCB_POLICY = { passthrough = true }
+loader.env.PCCS_URL = { passthrough = true }
+loader.env.MOCK_TEE_KEY = { passthrough = true }
+
+# Substrate / Hypertensor chain connection
+loader.env.SUBSTRATE_URL = { passthrough = true }
+loader.env.PHRASE = { passthrough = true }
+
+# Sealed storage path (inside enclave)
+loader.env.SEALED_STORAGE_PATH = { passthrough = true }
+
+# Allow the enclave to read from the enclave-provided random source
+sys.enable_extra_runtime_domain_names_conf = true
+
+# RA-TLS — Gramine generates TLS cert from MRENCLAVE measurement
+# This replaces the mock HMAC-signed cert with a hardware-attested cert
+sgx.remote_attestation = "dcap"
+sgx.ra_client_spid = ""      # DCAP does not use SPID
+sgx.ra_client_linkable = false
+
+# Enclave size — 512 MB minimum for Python + subnet deps
+sgx.enclave_size = "512M"
+
+# Thread count — one per CPU core + background tasks
+sgx.max_threads = 16
+
+# Enclave measurement covers:
+# - Gramine (measured by SGX MRENCLAVE)
+# - Python interpreter binary
+# - All Python .pyc files in subnet/
+# - This manifest (measured as part of the signing step)
+#
+# The resulting MRENCLAVE is what validators check against EXPECTED_MEASUREMENT.
+# Any change to Gramine, Python, or subnet code → different MRENCLAVE → sealed
+# data from previous binary is inaccessible (SealedDecryptionError).
+
+# -------------------------------------------------------------------------
+# File system entries
+# -------------------------------------------------------------------------
+
+fs.mounts = [
+    # Gramine libraries
+    { path = "/lib",       uri = "file:{{ gramine.runtimedir() }}" },
+    { path = "{{ arch_libdir }}", uri = "file:{{ arch_libdir }}" },
+
+    # Python standard library
+    { path = "/usr",       uri = "file:/usr" },
+
+    # Subnet application code (read-only)
+    { path = "/app",       uri = "file:." },
+
+    # NOTE: SealedStore (subnet/tee/sealed/store.py) uses application-level AES-GCM
+    # encryption keyed by HKDF(measurement, dev_key) — see D008. Sealed blobs are
+    # stored in the RocksDB "sealed" nmap column at /data (mounted below as allowed_files).
+    # Gramine's Protected FS (type="encrypted") is NOT used here: mixing both would
+    # double-encrypt and create a separate file path that SealedStore never writes.
+
+    # Ephemeral working directory
+    { path = "/tmp",       uri = "tmpfs" },
+
+    # RocksDB DHT database (not sealed — reproducible from network)
+    { path = "/data",      uri = "file:/var/lib/hypertensor/db" },
+
+    # TLS key files (written inside enclave, read from sealed storage in production)
+    { path = "/certs",     uri = "tmpfs" },
+
+    # Host attestation device (required for DCAP quote generation)
+    { path = "/dev/sgx_enclave",  uri = "dev:/dev/sgx_enclave" },
+    { path = "/dev/sgx_provision", uri = "dev:/dev/sgx_provision" },
+
+    # AESM socket for quote generation
+    { path = "/var/run/aesmd", uri = "file:/var/run/aesmd" },
+]
+
+# -------------------------------------------------------------------------
+# Allowed system calls
+# -------------------------------------------------------------------------
+
+# Gramine allowlist — minimise attack surface
+# Only syscalls required by Python + libp2p networking are permitted
+sys.syscalls = [
+    "accept4", "arch_prctl", "bind", "brk", "capget", "capset",
+    "clock_gettime", "clone", "clone3", "close", "connect", "dup", "dup2",
+    "dup3", "epoll_create1", "epoll_ctl", "epoll_pwait", "execve",
+    "exit", "exit_group", "faccessat", "fcntl", "fstat", "fstatat",
+    "ftruncate", "futex", "getcwd", "getdents64", "getegid", "geteuid",
+    "getgid", "getpid", "getppid", "getrandom", "gettid", "getuid",
+    "ioctl", "kill", "listen", "lseek", "madvise", "mmap", "mprotect",
+    "munmap", "nanosleep", "open", "openat", "pipe2", "poll", "pread64",
+    "prctl", "pwrite64", "read", "readlink", "recvfrom", "recvmsg",
+    "rt_sigaction", "rt_sigprocmask", "rt_sigreturn", "sched_getaffinity",
+    "sched_yield", "select", "sendmsg", "sendto", "set_robust_list",
+    "set_tid_address", "setgid", "setuid", "shutdown", "sigaltstack",
+    "socket", "socketpair", "stat", "tgkill", "uname", "unlink",
+    "unlinkat", "wait4", "write", "writev",
+]
+
+# -------------------------------------------------------------------------
+# Trusted files (measured into MRENCLAVE)
+# -------------------------------------------------------------------------
+
+# These files are measured at sign time and cannot change at runtime
+sgx.trusted_files = [
+    "file:{{ gramine.libos }}",
+    "file:{{ gramine.runtimedir() }}/",
+    "file:{{ arch_libdir }}/",
+    "file:/usr/lib/python3.12/",
+    "file:/usr/local/lib/python3.12/",
+    "file:/app/subnet/",
+    "file:/app/pyproject.toml",
+]
+
+# -------------------------------------------------------------------------
+# Allowed files (NOT measured — contents can change)
+# -------------------------------------------------------------------------
+
+# DHT data, configuration files that change without recompilation
+sgx.allowed_files = [
+    "file:/var/lib/hypertensor/db/",
+    "file:/etc/hosts",
+    "file:/etc/resolv.conf",
+    "file:/etc/nsswitch.conf",
+    "file:/var/run/aesmd/aesm.socket",
+    "file:/usr/share/ca-certificates/",
+    "file:/etc/ssl/certs/",
+]
+
+# sgx.encrypted_files — NOT used. SealedStore performs application-level sealing
+# (AES-GCM + HKDF measurement key) inside the Python process. The RocksDB at /data
+# is listed under sgx.allowed_files; Gramine does not need to re-encrypt it.
+# If you add standalone sealed files outside RocksDB, add their paths here.
+# sgx.encrypted_files = []

@@ -1,0 +1,118 @@
+# GPU Inference Example — CVM + NVIDIA NIM
+#
+# Architecture:
+#   nim         → Nemotron Nano 4B on GPU (OpenAI-compatible API)
+#   bootnode    → libp2p bootstrap (no GPU)
+#   validator   → TEE verification + scoring
+#   miner-1     → calls NIM for inference, signs output with TEE session key
+#
+# Prerequisites:
+#   - Azure NCCadsH100v5 (SEV-SNP + H100 confidential GPU)
+#   - NVIDIA Container Toolkit installed
+#   - NGC API key: export NGC_API_KEY=<your-key>
+#   - Docker login: echo $NGC_API_KEY | docker login nvcr.io -u '$oauthtoken' --password-stdin
+#
+# Usage:
+#   NGC_API_KEY=<key> docker compose -f docker-compose.gpu-inference.yml up --build
+#
+# Note: CVM backend used here for testing. Production requires Gramine/SGX.
+
+x-common-env: &common-env
+  MOCK_TEE: "true"
+  EXPECTED_MEASUREMENT: ""
+  MIN_TEE_SCORE: "0.0"
+  ALLOW_SHARED_HARDWARE: "true"  # example: dev mode
+  TAMPER_RATE: "0.0"
+  NIM_BASE_URL: "http://nim:8000"
+  NIM_MODEL: "meta/llama-3.2-1b-instruct"
+
+services:
+  # -- NVIDIA NIM (GPU inference server) ----------------------------------------
+  nim:
+    image: nvcr.io/nim/meta/llama-3.2-1b-instruct:latest
+    ports:
+      - "8000:8000"
+    environment:
+      NGC_API_KEY: ${NGC_API_KEY}
+      NIM_MODEL_PROFILE: ${NIM_MODEL_PROFILE:-}
+      NIM_RELAX_MEM_CONSTRAINTS: ${NIM_RELAX_MEM_CONSTRAINTS:-0}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    shm_size: "16gb"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
+  # -- Bootstrap node -----------------------------------------------------------
+  bootnode:
+    build: ../..
+    command: >
+      python3 -m subnet.cli.run_node
+      --private_key_path /data/boot.key
+      --port 38960
+      --is_bootstrap
+      --subnet_id 0
+      --base_path /data/boot
+    environment:
+      <<: *common-env
+    ports:
+      - "38960:38960"
+    volumes:
+      - boot-data:/data
+
+  # -- Validator ----------------------------------------------------------------
+  validator:
+    build: ../..
+    command: >
+      python3 -m subnet.cli.run_node
+      --private_key_path /data/validator.key
+      --port 38961
+      --subnet_id 0
+      --subnet_node_id 1
+      --bootstrap_addrs /dns4/bootnode/tcp/38960
+      --base_path /data/validator
+    environment:
+      <<: *common-env
+    depends_on:
+      bootnode:
+        condition: service_started
+    ports:
+      - "38961:38961"
+    volumes:
+      - validator-data:/data
+
+  # -- Miner (GPU inference) ----------------------------------------------------
+  miner-1:
+    build: ../..
+    command: >
+      python3 -m subnet.cli.run_node
+      --private_key_path /data/miner1.key
+      --port 38962
+      --subnet_id 0
+      --subnet_node_id 2
+      --bootstrap_addrs /dns4/bootnode/tcp/38960
+      --base_path /data/miner1
+    environment:
+      <<: *common-env
+    depends_on:
+      bootnode:
+        condition: service_started
+      nim:
+        condition: service_healthy
+    ports:
+      - "38962:38962"
+    volumes:
+      - miner1-data:/data
+
+volumes:
+  boot-data:
+  validator-data:
+  miner1-data:

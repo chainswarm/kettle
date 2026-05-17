@@ -1,0 +1,10 @@
+# Kata Containers runtime configuration for TEE inference nodes
+# Merge with /etc/kata-containers/configuration.toml
+
+[hypervisor.qemu]
+confidential_guest = true
+firmware = "/opt/kata/share/kata-containers/kata-containers.img"
+
+[agent.kata]
+policy_file = "/etc/kata-containers/policy.rego"
+enable_dm_verity = true

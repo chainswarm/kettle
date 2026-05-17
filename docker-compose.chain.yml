@@ -1,0 +1,209 @@
+version: '3.8'
+
+# Chain-connected staging stack — MOCK_TEE=true, no hardware required.
+#
+# Runs 1 bootnode + 1 validator + 1 overwatch + 2 miners connected to the Hypertensor testnet.
+# All nodes use the real chain for peer discovery and score submission.
+# MOCK_TEE=true stays — no EPYC hardware needed for testnet staging.
+#
+# Usage:
+#   CHAIN_ENDPOINT=wss://rpc.hypertensor.app:443 \
+#   SUBNET_ID=1 \
+#   VALIDATOR_PHRASE="word word word ..." \
+#   OVERWATCH_PHRASE="word word word ..." \
+#   OVERWATCH_NODE_ID=1 \
+#   MINER1_PHRASE="word word word ..." \
+#   MINER2_PHRASE="word word word ..." \
+#   docker compose -f docker-compose.chain.yml up --build
+#
+# Required environment variables:
+#   CHAIN_ENDPOINT     — Hypertensor testnet WebSocket URL
+#   SUBNET_ID          — Subnet friendly ID
+#   VALIDATOR_PHRASE   — Mnemonic for the validator node (signs propose_attestation)
+#   OVERWATCH_PHRASE   — Mnemonic for the overwatch node (signs commit/reveal slash extrinsics)
+#   OVERWATCH_NODE_ID  — Overwatch node ID assigned on-chain by register_overwatch_node.py
+#   MINER1_PHRASE      — Mnemonic for miner-1 (signs attest)
+#   MINER2_PHRASE      — Mnemonic for miner-2 (signs attest)
+#
+# Optional:
+#   TENSOR_PRIVATE_KEY — Alternative to PHRASE for any service
+#
+# Pre-flight — register the overwatch node before starting the stack:
+#   PHRASE="<overwatch mnemonic>" python scripts/register_overwatch_node.py --hotkey <SS58>
+#   → note the overwatch_node_id, set OVERWATCH_NODE_ID above
+#
+# The :? syntax causes Docker Compose to abort with a clear error if a required
+# variable is unset — preventing silent misconfiguration.
+
+x-chain-env: &chain-env
+  MOCK_TEE: "true"
+  EXPECTED_MEASUREMENT: ""
+  MIN_TEE_SCORE: "0.0"
+  TCB_POLICY: "strict"
+  ALLOW_SHARED_HARDWARE: "true"  # staging: mock TEE, shared machine
+  LOG_JSON: "true"
+  # DEV_RPC is what run_node.py reads for the chain WebSocket URL
+  DEV_RPC: ${CHAIN_ENDPOINT:?CHAIN_ENDPOINT is required for chain mode (e.g. wss://rpc.hypertensor.app:443)}
+  PHRASE: ""
+  TENSOR_PRIVATE_KEY: ${TENSOR_PRIVATE_KEY:-}
+
+services:
+  bootnode:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chain-bootnode
+    ports:
+      - "38960:38960"
+    volumes:
+      - ./bootnode.key:/app/bootnode.key:ro
+    environment:
+      <<: *chain-env
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    command: >
+      sh -c "test -n \"$$CHAIN_ENDPOINT\" || { echo 'ERROR: CHAIN_ENDPOINT is required'; exit 1; }
+      && exec python -m subnet.cli.run_node
+      --private_key_path /app/bootnode.key
+      --port 38960
+      --subnet_id ${SUBNET_ID:?SUBNET_ID is required for chain mode (e.g. 1)}
+      --is_bootstrap"
+    restart: unless-stopped
+
+  validator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chain-validator
+    ports:
+      - "38961:38961"
+    volumes:
+      - ./alith.key:/app/alith.key:ro
+      - chain-validator-db:/app/db
+    environment:
+      <<: *chain-env
+      TAMPER_RATE: "0.0"
+      PHRASE: ${VALIDATOR_PHRASE:?VALIDATOR_PHRASE is required (validator signs propose_attestation extrinsics)}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: >
+      sh -c "test -n \"$$CHAIN_ENDPOINT\" || { echo 'ERROR: CHAIN_ENDPOINT is required'; exit 1; }
+      && exec python -m subnet.cli.run_node
+      --private_key_path /app/alith.key
+      --port 38961
+      --bootstrap /dns4/bootnode/tcp/38960/p2p/12D3KooWLGmub3LXuKQixBD5XwNW4PtSfnrysYzqs1oj19HxMUCF
+      --subnet_id ${SUBNET_ID:?SUBNET_ID is required for chain mode (e.g. 1)}
+      --subnet_node_id 1"
+    depends_on:
+      - bootnode
+    restart: unless-stopped
+
+  overwatch:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chain-overwatch
+    ports:
+      - "38964:38964"
+    volumes:
+      - ./dorothy.key:/app/dorothy.key:ro
+      - chain-overwatch-db:/app/db
+    environment:
+      <<: *chain-env
+      PHRASE: ${OVERWATCH_PHRASE:?OVERWATCH_PHRASE is required (overwatch node signs slash commit/reveal extrinsics)}
+      OVERWATCH_PHRASE: ${OVERWATCH_PHRASE:?OVERWATCH_PHRASE is required}
+      OVERWATCH_NODE_ID: ${OVERWATCH_NODE_ID:?OVERWATCH_NODE_ID is required (set after register_overwatch_node.py)}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: >
+      sh -c "test -n \"$$CHAIN_ENDPOINT\" || { echo 'ERROR: CHAIN_ENDPOINT is required'; exit 1; }
+      && exec python -m subnet.cli.run_node
+      --private_key_path /app/dorothy.key
+      --port 38964
+      --bootstrap /dns4/bootnode/tcp/38960/p2p/12D3KooWLGmub3LXuKQixBD5XwNW4PtSfnrysYzqs1oj19HxMUCF
+      --subnet_id ${SUBNET_ID:?SUBNET_ID is required for chain mode (e.g. 1)}
+      --subnet_node_id 4"
+    depends_on:
+      - bootnode
+    restart: unless-stopped
+
+  miner-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chain-miner-1
+    ports:
+      - "38962:38962"
+    volumes:
+      - ./baltathar.key:/app/baltathar.key:ro
+      - chain-miner1-db:/app/db
+    environment:
+      <<: *chain-env
+      TAMPER_RATE: "0.001"
+      PHRASE: ${MINER1_PHRASE:?MINER1_PHRASE is required (miner-1 signs attest extrinsics)}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: >
+      sh -c "test -n \"$$CHAIN_ENDPOINT\" || { echo 'ERROR: CHAIN_ENDPOINT is required'; exit 1; }
+      && exec python -m subnet.cli.run_node
+      --private_key_path /app/baltathar.key
+      --port 38962
+      --bootstrap /dns4/bootnode/tcp/38960/p2p/12D3KooWLGmub3LXuKQixBD5XwNW4PtSfnrysYzqs1oj19HxMUCF
+      --subnet_id ${SUBNET_ID:?SUBNET_ID is required for chain mode (e.g. 1)}
+      --subnet_node_id 2"
+    depends_on:
+      - bootnode
+    restart: unless-stopped
+
+  miner-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chain-miner-2
+    ports:
+      - "38963:38963"
+    volumes:
+      - ./charleth.key:/app/charleth.key:ro
+      - chain-miner2-db:/app/db
+    environment:
+      <<: *chain-env
+      TAMPER_RATE: "0.001"
+      PHRASE: ${MINER2_PHRASE:?MINER2_PHRASE is required (miner-2 signs attest extrinsics)}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: >
+      sh -c "test -n \"$$CHAIN_ENDPOINT\" || { echo 'ERROR: CHAIN_ENDPOINT is required'; exit 1; }
+      && exec python -m subnet.cli.run_node
+      --private_key_path /app/charleth.key
+      --port 38963
+      --bootstrap /dns4/bootnode/tcp/38960/p2p/12D3KooWLGmub3LXuKQixBD5XwNW4PtSfnrysYzqs1oj19HxMUCF
+      --subnet_id ${SUBNET_ID:?SUBNET_ID is required for chain mode (e.g. 1)}
+      --subnet_node_id 3"
+    depends_on:
+      - bootnode
+    restart: unless-stopped
+
+volumes:
+  chain-validator-db:
+  chain-overwatch-db:
+  chain-miner1-db:
+  chain-miner2-db:

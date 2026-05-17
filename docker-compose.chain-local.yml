@@ -1,0 +1,204 @@
+version: '3.8'
+
+# Full integration stack: local Hypertensor dev chain + TEE subnet nodes.
+#
+# This is the L5 testing layer — real TEE hardware + real Substrate chain.
+# No mocks, no stubs, no external dependencies.
+#
+# The dev chain starts with Alice/Bob pre-funded accounts (10M HTSR each).
+# After startup, register the subnet and nodes using the scripts:
+#
+#   # Register subnet (Alice as owner)
+#   PHRASE="//Alice" python scripts/register_subnet.py --local_rpc --name "tee-test"
+#
+#   # Register nodes
+#   PHRASE="//Alice" python scripts/register_node.py --local_rpc --subnet_id 1 ...
+#
+# Usage:
+#   docker compose -f docker-compose.chain-local.yml up --build
+#
+# Prerequisites:
+#   - hypertensor-node:dev Docker image (build from hypertensor-v2 repo)
+#   - Azure CVM with /dev/tpmrm0 for real TEE (or MOCK_TEE=true for dev)
+
+x-tee-env: &tee-env
+  TEE_BACKEND: "sev-snp"
+  MOCK_TEE: "false"
+  EXPECTED_MEASUREMENT: ""
+  MIN_TEE_SCORE: "0.0"
+  TCB_POLICY: "strict"
+  LOG_JSON: "true"
+  OVERWATCH_NODE_ID: "1"
+  # Point to local dev chain
+  DEV_RPC: "ws://chain-node:9944"
+
+x-tpm-device: &tpm-device
+  devices:
+    - /dev/tpmrm0:/dev/tpmrm0
+
+services:
+  # ── Hypertensor dev chain node ──────────────────────────────
+  # Build from: https://github.com/hypertensor-blockchain/hypertensor-blockchain
+  # docker build -t hypertensor-node:dev .
+  chain-node:
+    image: hypertensor-node:dev
+    container_name: chain-node
+    ports:
+      - "9944:9944"   # WebSocket RPC
+      - "9933:9933"   # HTTP RPC
+      - "30333:30333" # P2P
+      - "9615:9615"   # Prometheus metrics
+    command: >
+      --dev
+      --rpc-external
+      --rpc-cors all
+      --rpc-methods unsafe
+    volumes:
+      - chain-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9933/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── Subnet nodes ────────────────────────────────────────────
+  bootnode:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chain-local-bootnode
+    ports:
+      - "38960:38960"
+    volumes:
+      - ./bootnode.key:/app/bootnode.key:ro
+    environment:
+      <<: *tee-env
+    <<: *tpm-device
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    command: >
+      subnet.cli.run_node
+      --private_key_path /app/bootnode.key
+      --port 38960
+      --subnet_id 1
+      --is_bootstrap
+    depends_on:
+      chain-node:
+        condition: service_healthy
+    restart: unless-stopped
+
+  validator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chain-local-validator
+    ports:
+      - "38961:38961"
+    volumes:
+      - ./alith.key:/app/alith.key:ro
+      - validator-db:/app/db
+    environment:
+      <<: *tee-env
+      PHRASE: "//Alice"
+      TAMPER_RATE: "0.0"
+    <<: *tpm-device
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: >
+      subnet.cli.run_node
+      --private_key_path /app/alith.key
+      --port 38961
+      --bootstrap /dns4/bootnode/tcp/38960/p2p/12D3KooWLGmub3LXuKQixBD5XwNW4PtSfnrysYzqs1oj19HxMUCF
+      --subnet_id 1
+      --subnet_node_id 1
+    depends_on:
+      chain-node:
+        condition: service_healthy
+      bootnode:
+        condition: service_started
+    restart: unless-stopped
+
+  miner-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chain-local-miner-1
+    ports:
+      - "38962:38962"
+    volumes:
+      - ./baltathar.key:/app/baltathar.key:ro
+      - miner1-db:/app/db
+    environment:
+      <<: *tee-env
+      PHRASE: "//Bob"
+      TAMPER_RATE: "1.0"
+    <<: *tpm-device
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: >
+      subnet.cli.run_node
+      --private_key_path /app/baltathar.key
+      --port 38962
+      --bootstrap /dns4/bootnode/tcp/38960/p2p/12D3KooWLGmub3LXuKQixBD5XwNW4PtSfnrysYzqs1oj19HxMUCF
+      --subnet_id 1
+      --subnet_node_id 2
+    depends_on:
+      chain-node:
+        condition: service_healthy
+      bootnode:
+        condition: service_started
+    restart: unless-stopped
+
+  miner-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chain-local-miner-2
+    ports:
+      - "38963:38963"
+    volumes:
+      - ./charleth.key:/app/charleth.key:ro
+      - miner2-db:/app/db
+    environment:
+      <<: *tee-env
+      PHRASE: "//Charlie"
+      TAMPER_RATE: "0.001"
+    <<: *tpm-device
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: >
+      subnet.cli.run_node
+      --private_key_path /app/charleth.key
+      --port 38963
+      --bootstrap /dns4/bootnode/tcp/38960/p2p/12D3KooWLGmub3LXuKQixBD5XwNW4PtSfnrysYzqs1oj19HxMUCF
+      --subnet_id 1
+      --subnet_node_id 3
+    depends_on:
+      chain-node:
+        condition: service_healthy
+      bootnode:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  chain-data:
+  validator-db:
+  miner1-db:
+  miner2-db:

@@ -1,0 +1,261 @@
+version: '3.8'
+
+# Real TEE stack — SEV-SNP attestation via Azure vTPM.
+#
+# Requires an Azure Confidential VM (DCasv5/DCadsv5) with:
+#   - /dev/tpmrm0 accessible
+#   - tpm2-tools installed in the Docker image
+#
+# All nodes generate real SNP attestation reports via the vTPM.
+# Validator scores with real hardware TEE (score=1.0 for UpToDate TCB).
+#
+# Usage:
+#   ANNOUNCE_IP=<public-ip> docker compose -f docker-compose.tee-real.yml up --build
+
+x-tee-env: &tee-env
+  TEE_BACKEND: "sev-snp"
+  MOCK_TEE: "false"
+  EXPECTED_MEASUREMENT: ""
+  MIN_TEE_SCORE: "0.0"
+  TCB_POLICY: "strict"
+  ALLOW_SHARED_HARDWARE: "true"  # test: all containers share one CVM
+  LOG_JSON: "true"
+  OVERWATCH_NODE_ID: "1"
+  ANNOUNCE_IP: "${ANNOUNCE_IP:-}"
+
+x-tpm-device: &tpm-device
+  devices:
+    - /dev/tpmrm0:/dev/tpmrm0
+
+services:
+  bootnode:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tee-real-bootnode
+    ports:
+      - "38960:38960"
+    volumes:
+      - ./bootnode.key:/app/bootnode.key:ro
+      - tee-bootnode-db:/app/db
+      - mock-chain:/app/mock_chain
+    environment:
+      <<: *tee-env
+      MOCK_CHAIN_DB_PATH: "/app/mock_chain/mock_hypertensor.db"
+    <<: *tpm-device
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    command: >
+      subnet.cli.run_node
+      --private_key_path /app/bootnode.key
+      --port 38960
+      --base_path /app/db/data
+      --subnet_id 1
+      --no_blockchain_rpc
+      --is_bootstrap
+    restart: unless-stopped
+
+  validator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tee-real-validator
+    ports:
+      - "38961:38961"
+    volumes:
+      - ./alith.key:/app/alith.key:ro
+      - tee-validator-db:/app/db
+      - mock-chain:/app/mock_chain
+    environment:
+      <<: *tee-env
+      MOCK_CHAIN_DB_PATH: "/app/mock_chain/mock_hypertensor.db"
+      TAMPER_RATE: "0.0"
+    <<: *tpm-device
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: >
+      subnet.cli.run_node
+      --private_key_path /app/alith.key
+      --port 38961
+      --base_path /app/db/data
+      --bootstrap /dns4/bootnode/tcp/38960/p2p/12D3KooWLGmub3LXuKQixBD5XwNW4PtSfnrysYzqs1oj19HxMUCF
+      --subnet_id 1
+      --subnet_node_id 1
+      --no_blockchain_rpc
+    depends_on:
+      - bootnode
+    restart: unless-stopped
+
+  miner-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tee-real-miner-1
+    ports:
+      - "38962:38962"
+    volumes:
+      - ./baltathar.key:/app/baltathar.key:ro
+      - tee-miner1-db:/app/db
+      - mock-chain:/app/mock_chain
+    environment:
+      <<: *tee-env
+      MOCK_CHAIN_DB_PATH: "/app/mock_chain/mock_hypertensor.db"
+      TAMPER_RATE: "1.0"
+    <<: *tpm-device
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: >
+      subnet.cli.run_node
+      --private_key_path /app/baltathar.key
+      --port 38962
+      --base_path /app/db/data
+      --bootstrap /dns4/bootnode/tcp/38960/p2p/12D3KooWLGmub3LXuKQixBD5XwNW4PtSfnrysYzqs1oj19HxMUCF
+      --subnet_id 1
+      --subnet_node_id 2
+      --no_blockchain_rpc
+    depends_on:
+      - bootnode
+    restart: unless-stopped
+
+  miner-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tee-real-miner-2
+    ports:
+      - "38963:38963"
+    volumes:
+      - ./charleth.key:/app/charleth.key:ro
+      - tee-miner2-db:/app/db
+      - mock-chain:/app/mock_chain
+    environment:
+      <<: *tee-env
+      MOCK_CHAIN_DB_PATH: "/app/mock_chain/mock_hypertensor.db"
+      TAMPER_RATE: "0.001"
+    <<: *tpm-device
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: >
+      subnet.cli.run_node
+      --private_key_path /app/charleth.key
+      --port 38963
+      --base_path /app/db/data
+      --bootstrap /dns4/bootnode/tcp/38960/p2p/12D3KooWLGmub3LXuKQixBD5XwNW4PtSfnrysYzqs1oj19HxMUCF
+      --subnet_id 1
+      --subnet_node_id 3
+      --no_blockchain_rpc
+    depends_on:
+      - bootnode
+    restart: unless-stopped
+
+  overwatch:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tee-real-overwatch
+    ports:
+      - "38964:38964"
+    volumes:
+      - ./dorothy.key:/app/dorothy.key:ro
+      - tee-overwatch-db:/app/db
+      - mock-chain:/app/mock_chain
+    environment:
+      <<: *tee-env
+      MOCK_CHAIN_DB_PATH: "/app/mock_chain/mock_hypertensor.db"
+    <<: *tpm-device
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: >
+      subnet.cli.run_node
+      --private_key_path /app/dorothy.key
+      --port 38964
+      --base_path /app/db/data
+      --bootstrap /dns4/bootnode/tcp/38960/p2p/12D3KooWLGmub3LXuKQixBD5XwNW4PtSfnrysYzqs1oj19HxMUCF
+      --subnet_id 1
+      --subnet_node_id 4
+      --no_blockchain_rpc
+      --insert_mock_overwatch_node
+    depends_on:
+      - bootnode
+    restart: unless-stopped
+
+  dashboard-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tee-real-dashboard-api
+    ports:
+      - "8100:8100"
+    volumes:
+      - tee-validator-db:/app/db
+      - mock-chain:/app/mock_chain:ro
+    environment:
+      PYTHONUNBUFFERED: "1"
+      DASHBOARD_DB_PATH: "/app/db/data"
+      DASHBOARD_PORT: "8100"
+      DASHBOARD_AUTH_TOKEN: "${DASHBOARD_AUTH_TOKEN:-dev-admin-token}"
+      MOCK_CHAIN_DB_PATH: "/app/mock_chain/mock_hypertensor.db"
+    command: >
+      subnet.dashboard.cli
+    depends_on:
+      - validator
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: tee-real-dashboard
+    ports:
+      - "3080:80"
+    depends_on:
+      - dashboard-api
+    restart: unless-stopped
+
+  x402-frontier:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tee-real-x402
+    ports:
+      - "8402:8402"
+    environment:
+      PYTHONUNBUFFERED: "1"
+      X402_PAYMENT_ADDRESS: "0x0000000000000000000000000000000000000000"
+      X402_REQUIRE_PAYMENT: "false"
+      X402_ACCEPTED_NETWORKS: "base-sepolia"
+      X402_ACCEPTED_TOKENS: "USDC"
+      FRONTIER_STALENESS_S: "6.0"
+    <<: *tpm-device
+    command: >
+      subnet.x402.cli
+    depends_on:
+      - validator
+    restart: unless-stopped
+
+volumes:
+  tee-bootnode-db:
+  tee-validator-db:
+  tee-miner1-db:
+  tee-miner2-db:
+  tee-overwatch-db:
+  mock-chain:
