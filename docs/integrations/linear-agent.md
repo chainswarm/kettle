@@ -88,6 +88,24 @@ Copy `.env.example` to `.env` and fill:
 Expose the future webhook worker through Cloudflare Tunnel or an equivalent
 public HTTPS endpoint.
 
+Run the local webhook worker:
+
+```bash
+python3 scripts/linear_agent_webhook.py
+```
+
+In another terminal, expose it with Cloudflare Tunnel:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8787
+```
+
+Use the resulting HTTPS URL as:
+
+```text
+https://<tunnel-host>/webhooks/linear
+```
+
 Manual smoke test for the local executor:
 
 ```bash

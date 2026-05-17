@@ -173,3 +173,4 @@ gramine.token
 .claude/worktrees/
 docs/references/gateway/
 docs/references/x402/
+.linear-agent/
