@@ -78,12 +78,16 @@ def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any] | None:
     if not LINEAR_ACCESS_TOKEN:
         return None
 
+    auth_value = LINEAR_ACCESS_TOKEN
+    if not auth_value.startswith("lin_api_") and not auth_value.lower().startswith("bearer "):
+        auth_value = f"Bearer {auth_value}"
+
     body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
     req = urllib_request.Request(
         "https://api.linear.app/graphql",
         data=body,
         headers={
-            "Authorization": f"Bearer {LINEAR_ACCESS_TOKEN}",
+            "Authorization": auth_value,
             "Content-Type": "application/json",
         },
         method="POST",
