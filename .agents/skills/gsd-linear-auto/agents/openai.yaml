@@ -1,0 +1,3 @@
+display_name: "GSD Linear Auto"
+short_description: "Run GSD autonomous mode, then sync planning results to Linear."
+default_prompt: "Run GSD autonomous workflow and sync the resulting GSD plan state to Linear."
