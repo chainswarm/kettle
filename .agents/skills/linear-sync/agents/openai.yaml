@@ -1,0 +1,3 @@
+display_name: "Linear Sync"
+short_description: "Start or refresh Kettle's Linear webhook and local Codex worker."
+default_prompt: "Start or refresh the Linear local agent stack for Kettle."
