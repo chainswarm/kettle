@@ -18,6 +18,7 @@ ISSUE_URL="${LINEAR_ISSUE_URL:-}"
 PROMPT_CONTEXT_PATH="${LINEAR_PROMPT_CONTEXT_PATH:-}"
 GSD_MODE="${LINEAR_GSD_MODE:-quick}"
 BASE_BRANCH="${LINEAR_BASE_BRANCH:-main}"
+BASE_REF="${LINEAR_BRANCH_BASE_REF:-$BASE_BRANCH}"
 CODEX_MODEL="${LINEAR_CODEX_MODEL:-}"
 
 cd "$REPO_DIR"
@@ -39,7 +40,11 @@ git fetch --quiet origin "$BASE_BRANCH" || true
 if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
   git switch "$BRANCH_NAME"
 else
-  git switch -c "$BRANCH_NAME" "origin/$BASE_BRANCH"
+  if git show-ref --verify --quiet "refs/heads/$BASE_REF"; then
+    git switch -c "$BRANCH_NAME" "$BASE_REF"
+  else
+    git switch -c "$BRANCH_NAME" "origin/$BASE_BRANCH"
+  fi
 fi
 
 prompt_context=""
@@ -82,7 +87,7 @@ ${prompt_context}
 EOF
 )
 
-codex_args=(exec -C "$REPO_DIR" --sandbox workspace-write --ask-for-approval never)
+codex_args=(--sandbox workspace-write --ask-for-approval never exec -C "$REPO_DIR")
 if [ -n "$CODEX_MODEL" ]; then
   codex_args+=(--model "$CODEX_MODEL")
 fi
