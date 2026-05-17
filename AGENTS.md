@@ -78,8 +78,9 @@ Use `$linear-plan-sync` to publish the GSD planning hierarchy into Linear:
 
 - GSD project -> Linear Project
 - GSD milestone -> Linear Project Milestone
-- GSD phase -> Linear Issue
+- GSD milestone -> one Linear Issue containing ordered phase checklist
 - GSD pending todo -> Linear backlog issue
+- GSD planning docs -> Linear Documents attached to the Project
 
 GSD remains the source of truth for technical details.
 

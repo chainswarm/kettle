@@ -1,7 +1,27 @@
 {
   "gsd": {
+    "documents": {
+      "project": {
+        "linearDocumentId": "2febb42d-a6c6-40c2-89d1-6ff4cfdf47b7",
+        "title": "Kettle \u2014 Project Brief"
+      },
+      "requirements": {
+        "linearDocumentId": "eb4d2781-d7ef-4192-9c55-4226f0c1acc3",
+        "title": "Kettle \u2014 Requirements"
+      },
+      "roadmap": {
+        "linearDocumentId": "2e5b3a50-34d4-406a-b996-83feb7066755",
+        "title": "Kettle \u2014 Roadmap"
+      },
+      "state": {
+        "linearDocumentId": "d6ff33cb-8c5b-40ff-95d2-ac035784a552",
+        "title": "Kettle \u2014 Current State"
+      }
+    },
     "milestones": {
       "v1.1": {
+        "identifier": "AFL-14",
+        "linearIssueId": "ec6e7a91-954b-48af-9c4c-b6a9a71d06a6",
         "linearMilestoneId": "e5b2d0dc-ac90-453e-8510-22c403bfca83",
         "name": "v1.1 \u2014 Subnet Block Explorer & Security Indexer"
       }

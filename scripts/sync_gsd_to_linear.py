@@ -16,9 +16,16 @@ ROOT = Path(__file__).resolve().parents[1]
 ENV_PATH = ROOT / ".env"
 ROADMAP_PATH = ROOT / ".planning" / "ROADMAP.md"
 PROJECT_PATH = ROOT / ".planning" / "PROJECT.md"
+REQUIREMENTS_PATH = ROOT / ".planning" / "REQUIREMENTS.md"
 STATE_PATH = ROOT / ".planning" / "STATE.md"
 TODO_DIR = ROOT / ".planning" / "todos" / "pending"
 MAP_PATH = ROOT / ".planning" / "integrations" / "linear-map.json"
+PLANNING_DOCUMENTS = (
+    ("project", PROJECT_PATH, "Project Brief"),
+    ("roadmap", ROADMAP_PATH, "Roadmap"),
+    ("requirements", REQUIREMENTS_PATH, "Requirements"),
+    ("state", STATE_PATH, "Current State"),
+)
 
 
 def load_env() -> dict[str, str]:
@@ -119,6 +126,25 @@ def parse_pending_todos() -> list[dict[str, str]]:
     return todos
 
 
+def planning_documents(project: str) -> list[dict[str, str]]:
+    docs: list[dict[str, str]] = []
+    for key, path, label in PLANNING_DOCUMENTS:
+        if not path.exists():
+            continue
+        content = path.read_text(encoding="utf-8").strip()
+        if not content:
+            continue
+        docs.append(
+            {
+                "key": key,
+                "title": f"{project} — {label}",
+                "source": str(path.relative_to(ROOT)),
+                "content": content[:60000],
+            }
+        )
+    return docs
+
+
 def get_team(env: dict[str, str]) -> dict[str, Any]:
     preferred = env.get("LINEAR_TEAM_KEY") or "AFL"
     data = graphql(env, "query { teams(first: 50) { nodes { id key name states { nodes { id name type } } } } }")
@@ -171,6 +197,26 @@ def ensure_milestone(env: dict[str, str], mapping: dict[str, Any], project_id: s
     return milestone_id
 
 
+def phase_checklist(phases: list[dict[str, str]]) -> str:
+    lines = ["## GSD Phase Order", ""]
+    for phase in phases:
+        box = "x" if phase["status"] == "Done" else " "
+        goal = f" — {phase['goal']}" if phase["goal"] else ""
+        lines.append(f"- [{box}] Phase {phase['number']}: {phase['name']}{goal}")
+    lines.extend(
+        [
+            "",
+            "## Source",
+            "",
+            "- `.planning/ROADMAP.md`",
+            "- `.planning/STATE.md`",
+            "",
+            "GSD owns execution order, plans, verification, and decisions. Linear is the coordination view.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def ensure_issue(
     env: dict[str, str],
     mapping_bucket: dict[str, Any],
@@ -205,6 +251,92 @@ def ensure_issue(
     return issue["id"]
 
 
+def ensure_milestone_issue(
+    env: dict[str, str],
+    mapping: dict[str, Any],
+    version: str,
+    title: str,
+    description: str,
+    team_id: str,
+    state_id: str,
+    project_id: str,
+    milestone_id: str,
+) -> str:
+    milestones = mapping.setdefault("gsd", {}).setdefault("milestones", {})
+    milestone_entry = milestones.setdefault(version, {"name": title, "linearMilestoneId": milestone_id})
+    issue_id = milestone_entry.get("linearIssueId")
+    issue_title = f"Milestone {title}"
+    input_data = {
+        "title": issue_title,
+        "description": description,
+        "teamId": team_id,
+        "stateId": state_id,
+        "projectId": project_id,
+        "projectMilestoneId": milestone_id,
+    }
+    if issue_id:
+        mutation = "mutation($id:String!,$input:IssueUpdateInput!){ issueUpdate(id:$id,input:$input){ success issue { id identifier title } } }"
+        graphql(env, mutation, {"id": issue_id, "input": input_data})
+        print(f"Updated Linear milestone issue: Milestone {title}")
+        return issue_id
+    existing = graphql(
+        env,
+        """
+        query($teamId:ID!,$title:String!){
+          issues(filter:{team:{id:{eq:$teamId}}, title:{eq:$title}}, first:5){
+            nodes { id identifier title }
+          }
+        }
+        """,
+        {"teamId": team_id, "title": issue_title},
+    )["issues"]["nodes"]
+    if existing:
+        issue = existing[0]
+        mutation = "mutation($id:String!,$input:IssueUpdateInput!){ issueUpdate(id:$id,input:$input){ success issue { id identifier title } } }"
+        graphql(env, mutation, {"id": issue["id"], "input": input_data})
+        milestone_entry.update({"linearIssueId": issue["id"], "identifier": issue["identifier"], "name": title})
+        print(f"Reused Linear milestone issue: {issue['identifier']} Milestone {title}")
+        return issue["id"]
+    mutation = "mutation($input:IssueCreateInput!){ issueCreate(input:$input){ success issue { id identifier title } } }"
+    result = graphql(env, mutation, {"input": input_data})
+    issue = result["issueCreate"]["issue"]
+    milestone_entry.update({"linearIssueId": issue["id"], "identifier": issue["identifier"], "name": title})
+    print(f"Created Linear milestone issue: {issue['identifier']} Milestone {title}")
+    return issue["id"]
+
+
+def document_content(doc: dict[str, str]) -> str:
+    return (
+        f"Synced from `{doc['source']}`.\n\n"
+        "GSD owns this document. Edit the source file locally, then run `$linear-plan-sync`.\n\n"
+        f"{doc['content']}"
+    )
+
+
+def ensure_document(
+    env: dict[str, str],
+    mapping: dict[str, Any],
+    key: str,
+    title: str,
+    content: str,
+    project_id: str,
+) -> str:
+    documents = mapping.setdefault("gsd", {}).setdefault("documents", {})
+    document_id = documents.get(key, {}).get("linearDocumentId")
+    input_data = {"title": title, "content": content, "projectId": project_id}
+    if document_id:
+        mutation = "mutation($id:String!,$input:DocumentUpdateInput!){ documentUpdate(id:$id,input:$input){ success document { id title } } }"
+        graphql(env, mutation, {"id": document_id, "input": input_data})
+        print(f"Updated Linear document: {title}")
+        return document_id
+    mutation = "mutation($input:DocumentCreateInput!){ documentCreate(input:$input){ success document { id title } } }"
+    result = graphql(env, mutation, {"input": input_data})
+    document = result["documentCreate"]["document"]
+    documents[key] = {"linearDocumentId": document["id"], "title": title}
+    print(f"Created Linear document: {title}")
+    return document["id"]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="Parse and print intended sync without writing Linear")
@@ -221,30 +353,39 @@ def main() -> None:
     version, milestone_name = current_milestone()
     phases = parse_phases()
     todos = parse_pending_todos()
+    docs = planning_documents(name)
 
     if args.dry_run:
-        print(json.dumps({"project": name, "milestone": milestone_name, "phases": phases, "todos": todos}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "project": name,
+                    "milestone": milestone_name,
+                    "phases": phases,
+                    "todos": todos,
+                    "documents": [{"key": doc["key"], "title": doc["title"], "source": doc["source"]} for doc in docs],
+                },
+                indent=2,
+            )
+        )
         return
 
     project_id = ensure_project(env, mapping, team["id"], name)
     milestone_id = ensure_milestone(env, mapping, project_id, version, milestone_name)
-    phase_bucket = mapping.setdefault("gsd", {}).setdefault("phases", {})
     todo_bucket = mapping.setdefault("gsd", {}).setdefault("todos", {})
 
-    for phase in phases:
-        key = f"phase-{phase['number']}"
-        title = f"Phase {phase['number']}: {phase['name']}"
-        description = "\n\n".join(
-            part
-            for part in [
-                phase["goal"],
-                "Synced from `.planning/ROADMAP.md`.",
-                f"```markdown\n{phase['body']}\n```",
-            ]
-            if part
-        )
-        state_id = done_state["id"] if phase["status"] == "Done" else todo_state["id"]
-        ensure_issue(env, phase_bucket, key, title, description, team["id"], state_id, project_id, milestone_id)
+    all_phases_done = bool(phases) and all(phase["status"] == "Done" for phase in phases)
+    ensure_milestone_issue(
+        env,
+        mapping,
+        version,
+        milestone_name,
+        phase_checklist(phases),
+        team["id"],
+        done_state["id"] if all_phases_done else todo_state["id"],
+        project_id,
+        milestone_id,
+    )
 
     for todo in todos:
         ensure_issue(
@@ -258,6 +399,9 @@ def main() -> None:
             project_id,
             milestone_id,
         )
+
+    for doc in docs:
+        ensure_document(env, mapping, doc["key"], doc["title"], document_content(doc), project_id)
 
     write_map(mapping)
     print(f"Wrote {MAP_PATH}")

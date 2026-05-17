@@ -17,8 +17,9 @@ This performs a conservative one-way sync:
 
 - GSD project -> Linear Project
 - GSD current milestone -> Linear Project Milestone
-- GSD phases -> Linear issues in the milestone
+- GSD current milestone -> one Linear milestone issue with ordered phase checklist
 - GSD pending todos -> Linear backlog issues
+- GSD planning docs -> Linear Documents attached to the project
 
 It writes the tracked mapping file:
 
