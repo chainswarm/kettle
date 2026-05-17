@@ -1,0 +1,63 @@
+{
+  "gsd": {
+    "milestones": {
+      "v1.1": {
+        "linearMilestoneId": "e5b2d0dc-ac90-453e-8510-22c403bfca83",
+        "name": "v1.1 \u2014 Subnet Block Explorer & Security Indexer"
+      }
+    },
+    "phases": {
+      "phase-1": {
+        "identifier": "AFL-5",
+        "linearIssueId": "56191b4a-678c-4828-9308-27ce591187b6",
+        "title": "Phase 1: Cross-CVM Networking Fix (v1.0)"
+      },
+      "phase-2": {
+        "identifier": "AFL-6",
+        "linearIssueId": "b0529fdd-c6b2-46b6-9537-310571a11e4d",
+        "title": "Phase 2: Real-Time Monitoring Dashboard (v1.0)"
+      },
+      "phase-3": {
+        "identifier": "AFL-7",
+        "linearIssueId": "d2eb1613-9473-44a3-8737-61695bb52c03",
+        "title": "Phase 3: Inference Integration (v1.0)"
+      },
+      "phase-4": {
+        "identifier": "AFL-8",
+        "linearIssueId": "1f5faacc-ee86-48d3-84dd-c0942a295ef8",
+        "title": "Phase 4: Security Event Indexer"
+      },
+      "phase-5": {
+        "identifier": "AFL-9",
+        "linearIssueId": "53abe56f-5ce3-4c59-a80a-c1b0e200c4ec",
+        "title": "Phase 5: Explorer API"
+      },
+      "phase-6": {
+        "identifier": "AFL-10",
+        "linearIssueId": "0fad8751-15c6-44c6-943c-67ef1bd6896c",
+        "title": "Phase 6: Explorer UI"
+      },
+      "phase-8": {
+        "identifier": "AFL-11",
+        "linearIssueId": "2d15262d-1b82-4461-bd6a-a4f6e503825a",
+        "title": "Phase 8: TEE-Attested Gateway"
+      },
+      "phase-9": {
+        "identifier": "AFL-12",
+        "linearIssueId": "706b6abb-4df1-447b-8cd1-281fadcd5d3c",
+        "title": "Phase 9: Agent Integration & Deployment"
+      }
+    },
+    "todos": {
+      ".planning/todos/pending/2026-03-25-show-node-earnings-or-balance-on-dashboard.md": {
+        "identifier": "AFL-13",
+        "linearIssueId": "83b41a9e-7199-4f3a-902d-adc4e46ef25d",
+        "title": "2026 03 25 show node earnings or balance on dashboard"
+      }
+    }
+  },
+  "linear": {
+    "projectId": "89cbd9db-d570-49f5-952a-59286856a29e"
+  },
+  "version": 1
+}

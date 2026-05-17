@@ -1,0 +1,3 @@
+display_name: "Linear Plan Sync"
+short_description: "Sync GSD project, milestone, phases, and todos into Linear."
+default_prompt: "Sync Kettle GSD planning structure into Linear Projects."

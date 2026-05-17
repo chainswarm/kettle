@@ -34,6 +34,7 @@ Use these repo-local skills when relevant:
 
 - `linear-sync` — start/refresh/stop Linear local agent sync.
 - `linear-local-agent` — operate and troubleshoot Linear webhook delivery.
+- `linear-plan-sync` — sync GSD project/milestone/phases/todos into Linear.
 - `hypertensor-subnet` — Hypertensor terminology and architecture rules.
 
 ## Secrets
@@ -69,3 +70,14 @@ Use GSD 1.x as the project state machine for Kettle:
 
 Superpowers skills are supporting discipline for brainstorming, debugging,
 TDD, and verification.
+
+## Linear Planning Sync
+
+Use `$linear-plan-sync` to publish the GSD planning hierarchy into Linear:
+
+- GSD project -> Linear Project
+- GSD milestone -> Linear Project Milestone
+- GSD phase -> Linear Issue
+- GSD pending todo -> Linear backlog issue
+
+GSD remains the source of truth for technical details.
