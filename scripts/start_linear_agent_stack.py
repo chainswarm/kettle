@@ -69,6 +69,44 @@ def is_running(pid_file: Path) -> bool:
         return False
 
 
+def pid_value(pid_file: Path) -> int | None:
+    if not pid_file.exists():
+        return None
+    try:
+        return int(pid_file.read_text(encoding="utf-8").strip())
+    except Exception:
+        return None
+
+
+def proc_cmdline(pid: int) -> str:
+    cmdline = Path(f"/proc/{pid}/cmdline")
+    if not cmdline.exists():
+        return ""
+    return cmdline.read_text(encoding="utf-8", errors="replace").replace("\x00", " ").strip()
+
+
+def pid_matches(pid_file: Path, expected: str) -> bool:
+    pid = pid_value(pid_file)
+    if pid is None or not is_running(pid_file):
+        return False
+    return expected in proc_cmdline(pid)
+
+
+def status(env: dict[str, str]) -> None:
+    port = int(env.get("LINEAR_AGENT_PORT", "8787"))
+    worker_pid = pid_value(WORKER_PID)
+    tunnel_pid = pid_value(TUNNEL_PID)
+    worker_ok = health_ok(port)
+    tunnel_url = parse_tunnel_url()
+    print("Linear local agent status")
+    print(f"- worker pid: {worker_pid or 'none'}")
+    print(f"- worker health: {'ok' if worker_ok else 'down'}")
+    print(f"- tunnel pid: {tunnel_pid or 'none'}")
+    print(f"- tunnel url: {tunnel_url or 'unknown'}")
+    print(f"- webhook url: {env.get('LINEAR_PUBLIC_WEBHOOK_URL') or 'unknown'}")
+    print(f"- trigger: {env.get('LINEAR_TRIGGER_PHRASE', '@kettle')}")
+
+
 def stop_pid(pid_file: Path) -> None:
     if not pid_file.exists():
         return
@@ -97,7 +135,12 @@ def start_worker(env: dict[str, str]) -> None:
     port = int(env.get("LINEAR_AGENT_PORT", "8787"))
     if health_ok(port):
         print(f"Worker already responds on http://127.0.0.1:{port}")
+        if not pid_matches(WORKER_PID, "linear_agent_webhook.py"):
+            print("WARNING: worker is healthy but PID file is stale or missing")
         return
+
+    if WORKER_PID.exists() and not pid_matches(WORKER_PID, "linear_agent_webhook.py"):
+        WORKER_PID.unlink(missing_ok=True)
 
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     log = WORKER_LOG.open("ab")
@@ -124,12 +167,14 @@ def start_tunnel(env: dict[str, str]) -> str:
 
     port = int(env.get("LINEAR_AGENT_PORT", "8787"))
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    if is_running(TUNNEL_PID):
+    if pid_matches(TUNNEL_PID, "cloudflared tunnel --url"):
         print("Existing cloudflared process is running; reading previous URL from log")
         url = parse_tunnel_url()
         if url:
             return url
         stop_pid(TUNNEL_PID)
+    elif TUNNEL_PID.exists():
+        TUNNEL_PID.unlink(missing_ok=True)
 
     log = TUNNEL_LOG.open("wb")
     proc = subprocess.Popen(
@@ -244,14 +289,26 @@ def ensure_webhook(env: dict[str, str], public_url: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stop", action="store_true", help="Stop background worker and tunnel")
+    parser.add_argument("--status", action="store_true", help="Report current worker/tunnel status")
+    parser.add_argument("--reuse", action="store_true", help="Reuse existing worker/tunnel instead of restarting")
     args = parser.parse_args()
+
+    env = load_env()
 
     if args.stop:
         stop_pid(WORKER_PID)
         stop_pid(TUNNEL_PID)
         return
 
-    env = load_env()
+    if args.status:
+        status(env)
+        return
+
+    if not args.reuse:
+        stop_pid(WORKER_PID)
+        stop_pid(TUNNEL_PID)
+        time.sleep(0.5)
+
     if not env.get("LINEAR_WEBHOOK_SECRET"):
         env["LINEAR_WEBHOOK_SECRET"] = f"lin_wh_{secrets.token_urlsafe(32)}"
         upsert_env({"LINEAR_WEBHOOK_SECRET": env["LINEAR_WEBHOOK_SECRET"]})

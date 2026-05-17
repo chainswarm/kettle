@@ -17,6 +17,10 @@ This starts or refreshes:
 - the Cloudflare tunnel
 - the Linear webhook URL
 
+The command restarts the managed worker/tunnel by default and refreshes Linear
+to the new tunnel URL. Use `python3 scripts/start_linear_agent_stack.py --status`
+to inspect current processes without restarting.
+
 After sync is running, Linear comments containing the trigger phrase start local
 Codex/GSD work:
 

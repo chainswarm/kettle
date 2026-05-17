@@ -17,6 +17,8 @@ python3 scripts/start_linear_agent_stack.py
 
 This starts the local webhook worker, starts a Cloudflare quick tunnel, and
 creates or updates the Linear webhook named by `LINEAR_WEBHOOK_LABEL`.
+By default it restarts the managed worker/tunnel and refreshes the Linear URL.
+Use `--reuse` only when explicitly requested.
 
 ## Stop
 

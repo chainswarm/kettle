@@ -22,6 +22,23 @@ Then report:
 - trigger phrase
 - log paths
 
+The default behavior is restart-and-refresh: stop the managed worker/tunnel,
+start fresh processes, and update Linear to the new tunnel URL.
+
+If the user explicitly asks to reuse existing processes, run:
+
+```bash
+python3 scripts/start_linear_agent_stack.py --reuse
+```
+
+## Status
+
+If the user asks whether it is running, run:
+
+```bash
+python3 scripts/start_linear_agent_stack.py --status
+```
+
 ## Stop
 
 If the user asks to stop Linear sync, run:
